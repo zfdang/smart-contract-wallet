@@ -14,7 +14,7 @@ import {
 import {INovaRegistry} from "../interfaces/INovaRegistry.sol";
 import {INovaApp} from "../interfaces/INovaApp.sol";
 import {INitroEnclaveVerifier} from "../interfaces/INitroEnclaveVerifier.sol";
-import {ZkCoProcessorType, VerifierJournal} from "../types/NitroTypes.sol";
+import {ZkCoProcessorType, VerifierJournal, Pcr} from "../types/NitroTypes.sol";
 import {AttestationLib} from "../libraries/AttestationLib.sol";
 
 /**
@@ -25,6 +25,7 @@ import {AttestationLib} from "../libraries/AttestationLib.sol";
  * Key features:
  * - PCR-based app grouping (apps with same PCRs share an appId)
  * - ZK proof verification of attestation reports
+ * - Attestation replay protection with nonce tracking
  * - Heartbeat mechanism for liveness tracking
  * - Gas budget management per app instance
  * - Version tracking for app instances
@@ -66,6 +67,15 @@ contract NovaRegistry is
 
     /// @dev Mapping to check if an app contract is already registered
     mapping(address => bool) private _isRegistered;
+
+    /// @dev Tracks used attestation hashes to prevent replay attacks
+    mapping(bytes32 => bool) private _usedAttestations;
+
+    /// @dev Tracks used nonces to prevent replay attacks (extra layer)
+    mapping(bytes32 => bool) private _usedNonces;
+
+    /// @dev Time window for attestation validity (5 minutes)
+    uint256 public constant ATTESTATION_VALIDITY_WINDOW = 5 minutes;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -201,6 +211,9 @@ contract NovaRegistry is
             proofBytes
         );
 
+        // Validate and consume attestation to prevent replay attacks
+        _validateAndConsumeAttestation(journal, appContract);
+
         // Extract attestation data
         (
             address ethAddress,
@@ -229,6 +242,132 @@ contract NovaRegistry is
             ethAddress,
             instance.version
         );
+    }
+
+    /**
+     * @dev Validates and marks attestation as used to prevent replay attacks
+     * @param journal VerifierJournal from attestation verification
+     * @param appContract App contract being activated
+     *
+     * Security measures:
+     * 1. Validates attestation timestamp freshness
+     * 2. Computes unique attestation hash from all critical fields
+     * 3. Checks if attestation hash already used
+     * 4. Checks if nonce already used (extra layer)
+     * 5. Marks both as used to prevent future replay
+     */
+    function _validateAndConsumeAttestation(
+        VerifierJournal memory journal,
+        address appContract
+    ) internal {
+        // 1. Validate timestamp freshness
+        _validateAttestationTimestamp(journal.timestamp);
+
+        // 2. Compute attestation hash (includes all critical fields)
+        bytes32 attestationHash = _computeAttestationHash(journal);
+
+        // 3. Check if attestation already used
+        if (_usedAttestations[attestationHash]) {
+            revert AttestationAlreadyUsed();
+        }
+
+        // 4. Check if nonce already used (extra layer of protection)
+        bytes32 nonceHash = keccak256(journal.nonce);
+        if (_usedNonces[nonceHash]) {
+            revert NonceAlreadyUsed();
+        }
+
+        // 5. Mark both as used
+        _usedAttestations[attestationHash] = true;
+        _usedNonces[nonceHash] = true;
+
+        emit AttestationConsumed(
+            appContract,
+            attestationHash,
+            nonceHash,
+            journal.timestamp
+        );
+    }
+
+    /**
+     * @dev Validates attestation timestamp is within acceptable window
+     * @param attestationTimestamp Timestamp from attestation (milliseconds)
+     *
+     * Checks:
+     * - Attestation is not from the future (allows 1 min clock drift)
+     * - Attestation is not too old (within ATTESTATION_VALIDITY_WINDOW)
+     */
+    function _validateAttestationTimestamp(uint64 attestationTimestamp) internal view {
+        // Convert milliseconds to seconds
+        uint256 attestationTime = uint256(attestationTimestamp) / 1000;
+        uint256 currentTime = block.timestamp;
+
+        // Check attestation is not from future (allow small clock drift)
+        if (attestationTime > currentTime + 1 minutes) {
+            revert AttestationFromFuture();
+        }
+
+        // Check attestation is not too old
+        if (currentTime > attestationTime + ATTESTATION_VALIDITY_WINDOW) {
+            revert AttestationExpired();
+        }
+    }
+
+    /**
+     * @dev Computes unique hash for attestation to prevent replay
+     * @param journal VerifierJournal from attestation verification
+     * @return Hash of attestation including all fields that make it unique
+     *
+     * Hash includes:
+     * - timestamp: When attestation was generated
+     * - nonce: Random value for uniqueness
+     * - userData: ETH address and TLS pubkey
+     * - publicKey: Enclave public key
+     * - moduleId: AWS Nitro module identifier
+     * - pcrs: Platform Configuration Registers
+     * - certs: Certificate chain hashes
+     */
+    function _computeAttestationHash(
+        VerifierJournal memory journal
+    ) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                journal.timestamp,
+                journal.nonce,
+                journal.userData,
+                journal.publicKey,
+                journal.moduleId,
+                _encodePCRs(journal.pcrs),
+                _encodeCerts(journal.certs)
+            )
+        );
+    }
+
+    /**
+     * @dev Helper function to encode PCR array for hashing
+     * @param pcrs Array of Platform Configuration Registers
+     * @return Hash of encoded PCR data
+     */
+    function _encodePCRs(Pcr[] memory pcrs) internal pure returns (bytes32) {
+        bytes memory encoded;
+        for (uint256 i = 0; i < pcrs.length; i++) {
+            encoded = abi.encodePacked(
+                encoded,
+                pcrs[i].index,
+                pcrs[i].value.first,
+                pcrs[i].value.second
+            );
+        }
+        return keccak256(encoded);
+    }
+
+    /**
+     * @dev Helper function to encode certificate array for hashing
+     * @param certs Array of certificate hashes
+     * @return Hash of certificate chain
+     */
+    function _encodeCerts(bytes32[] memory certs) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(certs));
     }
 
     /**

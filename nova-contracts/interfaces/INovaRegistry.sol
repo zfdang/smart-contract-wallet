@@ -60,6 +60,9 @@ interface INovaRegistry {
     event PCRsUpdated(address indexed appContract, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2);
     event AppFunded(address indexed appContract, address indexed funder, uint256 amount);
     event GasConsumed(address indexed appContract, uint256 amount);
+    event AttestationConsumed(
+        address indexed appContract, bytes32 indexed attestationHash, bytes32 indexed nonceHash, uint64 timestamp
+    );
 
     // Errors
     error AppAlreadyRegistered();
@@ -69,6 +72,10 @@ interface INovaRegistry {
     error VerificationFailed();
     error InsufficientGasBudget();
     error Unauthorized();
+    error AttestationAlreadyUsed();
+    error NonceAlreadyUsed();
+    error AttestationExpired();
+    error AttestationFromFuture();
 
     /**
      * @dev Register a new app with PCRs

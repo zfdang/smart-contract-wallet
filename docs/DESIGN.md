@@ -31,48 +31,37 @@ The Nova TEE Platform is an innovative infrastructure that bridges **Trusted Exe
 
 ## Architecture Overview
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    AWS Nitro Enclave                          │
-│  ┌────────────────────────────────────────────────────┐      │
-│  │  User Application                                  │      │
-│  │  - Generates temporary wallet keypair             │      │
-│  │  - Produces attestation report                    │      │
-│  │  - Signs UserOperations                           │      │
-│  └────────────────────────────────────────────────────┘      │
-└──────────────────────────────────────────────────────────────┘
-                            ↓
-                    [Attestation Report]
-                            ↓
-┌──────────────────────────────────────────────────────────────┐
-│               Nova Platform (Off-Chain)                       │
-│  - Obtains attestation from enclave                          │
-│  - Generates ZK proof via coprocessor                        │
-│  - Calls on-chain contracts                                  │
-│  - Monitors heartbeat                                        │
-└──────────────────────────────────────────────────────────────┘
-                            ↓
-                   [ZK Proof + Attestation]
-                            ↓
-┌──────────────────────────────────────────────────────────────┐
-│              On-Chain Contracts (Base Sepolia)                │
-│                                                               │
-│  ┌─────────────────┐                                         │
-│  │  NovaRegistry   │  ← Verifies ZK proofs                  │
-│  │   (UUPS Proxy)  │  ← Manages app lifecycle               │
-│  └────────┬────────┘  ← Tracks gas budgets                  │
-│           │                                                   │
-│           ├──────────► AppWalletFactory                      │
-│           │            (Deploys EIP-4337 wallets)            │
-│           │                                                   │
-│           └──────────► NovaPaymaster                         │
-│                        (Sponsors gas for apps)               │
-│                                                               │
-│  ┌─────────────────┐         ┌──────────────────┐          │
-│  │   App Contract  │◄───────┤   AppWallet      │          │
-│  │  (INovaApp)     │         │   (EIP-4337)     │          │
-│  └─────────────────┘         └──────────────────┘          │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph AWS_Nitro_Enclave["AWS Nitro Enclave"]
+        direction TB
+        UserApp["User Application<br/>- Generates temporary wallet keypair<br/>- Produces attestation report<br/>- Signs UserOperations"]
+    end
+
+    subgraph Nova_Platform["Nova Platform (Off-Chain)"]
+        direction TB
+        PlatformLogic["- Obtains attestation from enclave<br/>- Generates ZK proof via coprocessor<br/>- Calls on-chain contracts<br/>- Monitors heartbeat"]
+    end
+
+    subgraph On_Chain["On-Chain Contracts (Base Sepolia)"]
+        direction TB
+        NovaRegistry["NovaRegistry<br/>(UUPS Proxy)<br/>← Verifies ZK proofs<br/>← Manages app lifecycle<br/>← Tracks gas budgets"]
+        AppWalletFactory["AppWalletFactory<br/>(Deploys EIP-4337 wallets)"]
+        NovaPaymaster["NovaPaymaster<br/>(Sponsors gas for apps)"]
+        
+        AppContract["App Contract<br/>(INovaApp)"]
+        AppWallet["AppWallet<br/>(EIP-4337)"]
+    end
+
+    UserApp -->|Attestation Report| PlatformLogic
+    PlatformLogic -->|ZK Proof + Attestation| NovaRegistry
+    
+    NovaRegistry --> AppWalletFactory
+    NovaRegistry --> NovaPaymaster
+    
+    AppWalletFactory -->|Deploys| AppWallet
+    AppWallet -->|Controls| AppContract
+    NovaPaymaster -.->|Sponsors| AppWallet
 ```
 
 ## Key Design Decisions
@@ -146,27 +135,19 @@ The Nova TEE Platform is an innovative infrastructure that bridges **Trusted Exe
 
 ### App Registration Flow
 
-```
-Developer        AppContract      NovaRegistry
-    |                 |                |
-    |-- deploy ------>|                |
-    |                 |                |
-    |-- initialize -->|                |
-    |    (PCRs)       |                |
-    |                 |                |
-    |-- registerApp ----------------->|
-    |    (app, PCRs)                  |
-    |                 |                |
-    |                 |<- verify ------|
-    |                 |   publisher    |
-    |                 |                |
-    |                 |<- verify ------|
-    |                 |   novaPlatform |
-    |                 |                |
-    |<--------------- emit ------------|
-    |  AppRegistered                   |
-    |                 |                |
-    [Status: Registered]
+```mermaid
+sequenceDiagram
+    participant Developer
+    participant AppContract
+    participant NovaRegistry
+
+    Developer->>AppContract: deploy
+    Developer->>AppContract: initialize (PCRs)
+    Developer->>NovaRegistry: registerApp (app, PCRs)
+    NovaRegistry->>AppContract: verify publisher
+    NovaRegistry->>AppContract: verify novaPlatform
+    NovaRegistry-->>Developer: emit AppRegistered
+    Note over Developer: [Status: Registered]
 ```
 
 ### App Activation Flow
@@ -175,85 +156,49 @@ This is the critical process where an application deployed in AWS Nitro Enclave 
 
 #### Detailed Step-by-Step Process
 
-```
-Platform    Enclave    ZKProver    Verifier    NovaRegistry    AppWalletFactory    AppContract
-    |          |           |            |              |              |                |
-    |          |           |            |              |              |                |
- 1. |--------->|           |            |              |              |                |
-    | Deploy app to Enclave|            |              |              |                |
-    |          |           |            |              |              |                |
-    |          |           |            |              |              |                |
- 2. |          | [Inside Enclave:]      |              |              |                |
-    |          | - App running          |              |              |                |
-    |          | - Generate wallet      |              |              |                |
-    |          | - Generate nonce       |              |              |                |
-    |          | - Produce attestation  |              |              |                |
-    |          |           |            |              |              |                |
-    |          |           |            |              |              |                |
- 3. |<---------|           |            |              |              |                |
-    | Retrieve attestation |            |              |              |                |
-    | (ETH addr, TLS pubkey, nonce, PCRs, timestamp, signatures)     |                |
-    |          |           |            |              |              |                |
-    |          |           |            |              |              |                |
- 4. |--------------------->|            |              |              |                |
-    | Send attestation     |            |              |              |                |
-    |          |           |            |              |              |                |
-    |          |           | [Generate ZK Proof]       |              |                |
-    |          |           | - Verify signature        |              |                |
-    |          |           | - Extract data            |              |                |
-    |          |           |            |              |              |                |
-    |<---------------------|            |              |              |                |
-    | Return proof + journal            |              |              |                |
-    |          |           |            |              |              |                |
-    |          |           |            |              |              |                |
- 5. |------------------------------------------------->|              |                |
-    | activateApp(output, zkCoprocessor, proof)       |              |                |
-    |          |           |            |              |              |                |
-    |          |           |            |              |              |                |
-6.1 |         |           |            |<-------------|              |                |
-    |          |           |            | Verify proof |              |                |
-    |          |           |            |              |              |                |
-    |          |           |            |------------->|              |                |
-    |          |           |            | Return journal              |                |
-    |          |           |            | (ETH addr, nonce, PCRs...)  |                |
-    |          |           |            |              |              |                |
-    |          |           |            |              |              |                |
-6.2 |         |           |            |    [Validate & Consume Attestation]          |
-    |          |           |            |    - Check timestamp freshness              |
-    |          |           |            |    - Check attestation not used             |
-    |          |           |            |    - Check nonce not used                   |
-    |          |           |            |    - Mark both as consumed                  |
-    |          |           |            |              |              |                |
-    |          |           |            |    [Extract & Validate PCRs]                |
-    |          |           |            |              |              |                |
-    |          |           |            |              |              |                |
-6.3 |         |           |            |              |------------->|                |
-    |          |           |            |              | Deploy wallet|                |
-    |          |           |            |              |<-------------|                |
-    |          |           |            |              |              |                |
-    |          |           |            |              |------------------------------>|
-    |          |           |            |              | setOperator(ETH addr)         |
-    |          |           |            |              |              |                |
-6.4 |         |           |            |    [Update status to Active]|                |
-    |          |           |            |              |              |                |
-    |<-------------------------------------------------|              |                |
-    | emit AppActivated(appContract, operator, wallet)|              |                |
-    |          |           |            |              |-- deploy --->|                |
-    |          |           |            |              | AppWallet(   |                |
-    |          |           |            |              |  operator =  |                |
-    |          |           |            |              |  ETH addr)   |                |
-    |          |           |            |              |              |                |
-    |          |           |            |              |<- wallet ----|                |
-    |          |           |            |              |   address    |                |
-    |          |           |            |              |              |                |
-    |          |           |            |              |-- setOperator(ETH addr) ----->|
-    |          |           |            |              |              |                |
-6.4 |         |           |            |              |              |                |
-    |          |           |        [Update instance status to Active]|                |
-    |          |           |            |              |              |                |
-    |<------------ emit AppActivated(appContract, operator, wallet) --|                |
-    |          |           |            |              |              |                |
-    [Status: Active, gas-free operations enabled]
+```mermaid
+sequenceDiagram
+    participant Platform
+    participant Enclave
+    participant ZKProver
+    participant Verifier
+    participant NovaRegistry
+    participant AppWalletFactory
+    participant AppContract
+
+    Note over Platform, Enclave: Step 1: Deploy App
+    Platform->>Enclave: Deploy app to Enclave
+    
+    Note over Enclave: Step 2: Enclave Logic
+    Note right of Enclave: - App running<br/>- Generate wallet<br/>- Generate nonce<br/>- Produce attestation
+
+    Enclave-->>Platform: Step 3: Retrieve attestation<br/>(ETH addr, TLS pubkey, nonce, PCRs, timestamp, signatures)
+
+    Note over Platform, ZKProver: Step 4: ZK Proof Generation
+    Platform->>ZKProver: Send attestation
+    Note right of ZKProver: - Verify signature<br/>- Extract data
+    ZKProver-->>Platform: Return proof + journal
+
+    Note over Platform, NovaRegistry: Step 5: Activation Call
+    Platform->>NovaRegistry: activateApp(output, zkCoprocessor, proof)
+
+    Note over NovaRegistry, Verifier: Step 6.1: Verify Proof
+    NovaRegistry->>Verifier: Verify proof
+    Verifier-->>NovaRegistry: Return journal
+
+    Note over NovaRegistry: Step 6.2: Validate & Consume
+    Note right of NovaRegistry: - Check timestamp freshness<br/>- Check attestation not used<br/>- Check nonce not used<br/>- Mark both as consumed<br/>- Extract & Validate PCRs
+
+    Note over NovaRegistry, AppWalletFactory: Step 6.3: Deploy Wallet
+    NovaRegistry->>AppWalletFactory: Deploy wallet
+    AppWalletFactory-->>NovaRegistry: wallet address
+    NovaRegistry->>AppContract: setOperator(ETH addr)
+
+    Note over NovaRegistry: Step 6.4: Finalize
+    Note right of NovaRegistry: Update status to Active
+    NovaRegistry-->>Platform: emit AppActivated(appContract, operator, wallet)
+    
+    Note over Platform: [Status: Active, gas-free operations enabled]
 ```
 
 #### Activation Flow Breakdown
@@ -375,7 +320,7 @@ journal.validatePCRs(metadata.pcr0, metadata.pcr1, metadata.pcr2);
 **Step 6.3: Deploy Smart Contract Wallet**
 ```solidity
 instance.operator = ethAddress;
-instance.walletAddress = ethAddress; // Updated when wallet deployed
+instance.walletAddress = address(0); // Placeholder, updated when wallet deployed
 INovaApp(appContract).setOperator(ethAddress);
 ```
 - Register operator (enclave's ETH address) in AppInstance
@@ -391,62 +336,52 @@ INovaApp(appContract).setOperator(ethAddress);
 
 ### UserOperation Execution Flow
 
-```
-Operator    AppWallet    EntryPoint    Paymaster    NovaRegistry
-   |            |             |             |              |
-   |-- sign UserOp ---------->|             |              |
-   |            |             |             |              |
-   |            |<- validate -|             |              |
-   |            |   signature |             |              |
-   |            |             |             |              |
-   |            |             |-- validate ->              |
-   |            |             |   paymaster |              |
-   |            |             |             |              |
-   |            |             |             |<- get app ---|
-   |            |             |             |   instance   |
-   |            |             |             |              |
-   |            |             |             |-- check ---->|
-   |            |             |             |   budget     |
-   |            |             |             |              |
-   |            |             |<- accept ---|              |
-   |            |             |             |              |
-   |            |<- execute --|             |              |
-   |            |             |             |              |
-   |<- business logic --------|             |              |
-   |   execution              |             |              |
-   |            |             |             |              |
-   |            |             |-- postOp -->|              |
-   |            |             |             |              |
-   |            |             |             |-- deductGas ->
-   |            |             |             |              |
-   [Gas deducted from budget]
+```mermaid
+sequenceDiagram
+    participant Operator
+    participant AppWallet
+    participant EntryPoint
+    participant Paymaster
+    participant NovaRegistry
+
+    Operator->>EntryPoint: sign UserOp
+    EntryPoint->>AppWallet: validate signature
+    EntryPoint->>Paymaster: validate paymaster
+    Paymaster->>NovaRegistry: get app instance
+    NovaRegistry-->>Paymaster: check budget
+    Paymaster-->>EntryPoint: accept
+    EntryPoint->>AppWallet: execute
+    AppWallet->>Operator: business logic execution
+    EntryPoint->>Paymaster: postOp
+    Paymaster->>NovaRegistry: deductGas
+    Note over NovaRegistry: [Gas deducted from budget]
 ```
 
 ## Security Architecture
 
 ### Trust Boundaries
 
-```
-┌─────────────────────────────────────────┐
-│   Trusted Components                    │
-│   - AWS Nitro Enclave hardware         │
-│   - ZK Verifier contract                │
-│   - EIP-4337 EntryPoint                 │
-└─────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph Trusted["Trusted Components"]
+        Nitro["AWS Nitro Enclave hardware"]
+        ZK["ZK Verifier contract"]
+        EntryPoint["EIP-4337 EntryPoint"]
+    end
 
-┌─────────────────────────────────────────┐
-│   Semi-Trusted Components               │
-│   - Nova Platform (PLATFORM_ROLE)       │
-│     Can: Activate apps, heartbeat       │
-│     Cannot: Modify app data, steal funds│
-└─────────────────────────────────────────┘
+    subgraph SemiTrusted["Semi-Trusted Components"]
+        Platform["Nova Platform (PLATFORM_ROLE)<br/>Can: Activate apps, heartbeat<br/>Cannot: Modify app data, steal funds"]
+    end
 
-┌─────────────────────────────────────────┐
-│   Untrusted Components                  │
-│   - App developers                      │
-│   - App operators                       │
-│   - General users                       │
-└─────────────────────────────────────────┘
+    subgraph Untrusted["Untrusted Components"]
+        Devs["App developers"]
+        Ops["App operators"]
+        Users["General users"]
+    end
+    
+    style Trusted fill:#d4edda,stroke:#28a745,stroke-width:2px
+    style SemiTrusted fill:#fff3cd,stroke:#ffc107,stroke-width:2px
+    style Untrusted fill:#f8d7da,stroke:#dc3545,stroke-width:2px
 ```
 
 ### Attack Surface Analysis
@@ -828,112 +763,35 @@ struct GasStats {
 
 ### Recommended Production Setup
 
+```mermaid
+graph TD
+    subgraph Governance["Governance Layer"]
+        Safe["Gnosis Safe (Multi-sig)"]
+        Timelock["Timelock Controller"]
+    end
+
+    subgraph OnChain["On-Chain Contracts (Base Mainnet)"]
+        Registry["NovaRegistry (UUPS Proxy)"]
+        Factory["AppWalletFactory"]
+        Paymaster["NovaPaymaster"]
+        AppContract["App Contract (INovaApp)"]
+    end
+
+    subgraph PlatformServices["Platform Services"]
+        AVS["Attestation Verification Service"]
+        Monitor["Heartbeat Monitor"]
+        Prover["ZK Proof Generator"]
+        Indexer["Event Indexer"]
+    end
+
+    subgraph AWS["AWS Infrastructure"]
+        EC2["EC2 Instances with Nitro Enclaves"]
+        KMS["KMS for key management"]
+        CloudWatch["CloudWatch for monitoring"]
+    end
+
+    Governance -->|Controls| OnChain
+    PlatformServices -->|Interacts with| OnChain
+    PlatformServices -->|Manages| AWS
 ```
-┌─────────────────────────────────────────────────┐
-│  Governance Layer                                │
-│  - Gnosis Safe (Multi-sig)                      │
-│  - Timelock Controller                          │
-└─────────────────────────────────────────────────┘
-                    ↓
-┌─────────────────────────────────────────────────┐
-│  On-Chain Contracts (Base Mainnet)              │
-│  - NovaRegistry (UUPS Proxy)                    │
-│  - AppWalletFactory                             │
-│  - NovaPaymaster                                │
-└─────────────────────────────────────────────────┘
-                    ↑
-┌─────────────────────────────────────────────────┐
-│  Platform Services                               │
-│  - Attestation Verification Service             │
-│  - Heartbeat Monitor                            │
-│  - ZK Proof Generator                           │
-│  - Event Indexer                                │
-└─────────────────────────────────────────────────┘
-                    ↑
-┌─────────────────────────────────────────────────┐
-│  AWS Infrastructure                              │
-│  - EC2 Instances with Nitro Enclaves           │
-│  - KMS for key management                       │
-│  - CloudWatch for monitoring                    │
-└─────────────────────────────────────────────────┘
-```
 
-## Future Enhancements
-
-### Phase 2: Advanced Features
-
-1. **Multi-Operator Support**: Allow multiple operators per app
-2. **Automated Budget Refill**: Auto-refill from app balance
-3. **Slashing Mechanism**: Penalize misbehaving apps
-4. **Operator Rotation**: Scheduled operator updates
-
-### Phase 3: Decentralization
-
-1. **Decentralized Governance**: Token-based platform governance
-2. **Permissionless Activation**: Remove PLATFORM_ROLE requirement
-3. **Decentralized ZK Proving**: Distributed proof generation
-4. **DAO Treasury**: Community-managed gas sponsorship
-
-### Phase 4: Scaling
-
-1. **Cross-Chain Support**: Deploy on multiple chains
-2. **L2 Optimization**: Optimized for L2s (Optimism, Arbitrum)
-3. **Batch Activation**: Activate multiple apps in one tx
-4. **Optimistic Verification**: Reduce verification costs
-
-## Conclusion
-
-The Nova TEE Platform represents a novel approach to combining trusted execution environments with blockchain technology. By leveraging:
-
-- **Zero-knowledge proofs** for verifiable computation
-- **Multi-layer replay protection** for attestation security
-- **EIP-4337** for seamless user experience
-- **UUPS proxies** for upgradeability
-- **PCR-based grouping** for app discovery
-- **Time-bounded validation** for freshness guarantees
-
-The platform provides a robust foundation for the next generation of Web 3.0 applications that require both privacy and verifiability.
-
-The architecture balances **security**, **usability**, and **decentralization** to create a production-ready system that can scale to thousands of applications while maintaining strong cryptographic guarantees.
-
-**Recent Security Enhancements (v2.0.0)**:
-- ✅ Industrial-grade attestation replay protection
-- ✅ Nonce-based uniqueness guarantee
-- ✅ Time-window validation (5 minutes)
-- ✅ Comprehensive test coverage
-- ✅ +15% gas cost for significant security improvement
-
----
-
-**Document Version**: 2.1  
-**Last Updated**: 2025-11-24  
-**Status**: Production Ready with Replay Protection Implemented  
-**Security Review**: Comprehensive threat analysis completed
-
----
-
-## Changelog
-
-### Version 2.1 (2025-11-24)
-- ✅ Implemented attestation replay protection in NovaRegistry
-- ✅ Fixed App Activation Flow diagram (Platform-Enclave interactions)
-- ✅ Added nonce generation in Step 2
-- ✅ Detailed replay protection validation in Step 6.2
-- ✅ Updated gas cost estimates (+47k for replay protection)
-- ✅ Marked Critical Issue #1 as SOLVED
-- ✅ Updated security audit checklist with implementation status
-- ✅ Added comprehensive test suite (9 test cases)
-
-### Version 2.0 (2025-11-24)
-- Added detailed App Activation Flow with step-by-step breakdown
-- Comprehensive security issue analysis and mitigations
-- Added attestation replay protection recommendations
-- Added operator key rotation strategies
-- Enhanced gas budget management proposals
-- Platform decentralization roadmap
-- Security audit checklist
-
-### Version 1.0 (2025-11-20)
-- Initial system design documentation
-- Core architecture overview
-- Basic security model

@@ -5,23 +5,37 @@ pragma solidity ^0.8.24;
  * @title INovaApp
  * @notice Standard interface that all Nova platform applications must implement
  * @dev This interface ensures consistent interaction between the Nova platform and application contracts.
+ * 
  * App contracts implementing this interface can be registered and managed by the NovaRegistry contract.
+ * The interface provides:
+ * - Publisher identification and control
+ * - Nova platform registry reference
+ * - PCR (Platform Configuration Register) management
+ * - Initialization lifecycle
  */
 interface INovaApp {
-    /**
-     * @dev Emitted when the operator address is updated
-     * @param oldOperator Previous operator address
-     * @param newOperator New operator address
-     */
-    event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
+    // ============================================
+    // Events
+    // ============================================
 
     /**
-     * @dev Emitted when PCRs are updated
-     * @param pcr0 New PCR0 value
-     * @param pcr1 New PCR1 value
-     * @param pcr2 New PCR2 value
+     * @dev Emitted when PCRs are initialized
+     * @param pcr0 PCR0 value
+     * @param pcr1 PCR1 value
+     * @param pcr2 PCR2 value
      */
-    event PCRsUpdated(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2);
+    event PCRsInitialized(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2);
+
+    /**
+     * @dev Emitted when the Nova platform address is updated
+     * @param oldPlatform Previous platform address
+     * @param newPlatform New platform address
+     */
+    event PlatformUpdated(address indexed oldPlatform, address indexed newPlatform);
+
+    // ============================================
+    // Errors
+    // ============================================
 
     /**
      * @dev Error thrown when caller is not authorized
@@ -31,7 +45,21 @@ interface INovaApp {
     /**
      * @dev Error thrown when the Nova platform address is invalid
      */
-    error InvalidNovaPlatform();
+    error InvalidPlatform();
+
+    /**
+     * @dev Error thrown when PCR values are invalid
+     */
+    error InvalidPCRs();
+
+    /**
+     * @dev Error thrown when app is already initialized
+     */
+    error AlreadyInitialized();
+
+    // ============================================
+    // View Functions
+    // ============================================
 
     /**
      * @dev Returns the address of the application publisher (developer)
@@ -46,42 +74,59 @@ interface INovaApp {
     function novaPlatform() external view returns (address);
 
     /**
-     * @dev Returns the current operator address
-     * @return Address of the operator (enclave instance wallet)
+     * @dev Returns PCR0 value
+     * @return PCR0 (Platform Configuration Register 0)
      */
-    function operator() external view returns (address);
+    function pcr0() external view returns (bytes32);
 
     /**
-     * @dev Sets a new operator address
-     * @param _operator New operator address to be set
-     *
-     * Requirements:
-     * - Only callable by the Nova platform contract
-     * - The new operator address must not be zero address
-     *
-     * Emits an {OperatorUpdated} event
+     * @dev Returns PCR1 value
+     * @return PCR1 (Platform Configuration Register 1)
      */
-    function setOperator(address _operator) external;
+    function pcr1() external view returns (bytes32);
 
     /**
-     * @dev Requests an update to the registered PCRs
-     * @param pcr0 New PCR0 value
-     * @param pcr1 New PCR1 value
-     * @param pcr2 New PCR2 value
+     * @dev Returns PCR2 value
+     * @return PCR2 (Platform Configuration Register 2)
+     */
+    function pcr2() external view returns (bytes32);
+
+    // ============================================
+    // State-Changing Functions
+    // ============================================
+
+    /**
+     * @dev Initialize the app with PCR values
+     * @param _pcr0 PCR0 value from enclave build
+     * @param _pcr1 PCR1 value from enclave build
+     * @param _pcr2 PCR2 value from enclave build
      *
      * Requirements:
      * - Only callable by the publisher
-     * - Triggers a call to NovaRegistry to update PCRs
+     * - Can only be called once
+     * - PCR values must not be zero
      *
-     * Emits a {PCRsUpdated} event
+     * Emits a {PCRsInitialized} event
+     * 
+     * @notice This must be called before registering with NovaRegistry
      */
-    function requestPCRUpdate(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) external;
+    function initialize(
+        bytes32 _pcr0,
+        bytes32 _pcr1,
+        bytes32 _pcr2
+    ) external;
 
     /**
-     * @dev Returns the currently registered PCR values
-     * @return pcr0 PCR0 value
-     * @return pcr1 PCR1 value
-     * @return pcr2 PCR2 value
+     * @dev Update the Nova platform registry address
+     * @param _novaPlatform New platform address
+     *
+     * Requirements:
+     * - Only callable by the publisher
+     * - New platform address must not be zero
+     *
+     * Emits a {PlatformUpdated} event
+     * 
+     * @notice Use this to upgrade to a new NovaRegistry deployment
      */
-    function getPCRs() external view returns (bytes32 pcr0, bytes32 pcr1, bytes32 pcr2);
+    function updatePlatform(address _novaPlatform) external;
 }

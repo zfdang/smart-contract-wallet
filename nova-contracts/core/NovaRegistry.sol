@@ -449,6 +449,44 @@ contract NovaRegistry is
     /**
      * @inheritdoc INovaRegistry
      */
+    function batchHeartbeat(
+        address[] memory apps
+    ) external override onlyRole(PLATFORM_ROLE) {
+        uint256 timestamp = block.timestamp;
+        
+        for (uint256 i = 0; i < apps.length; i++) {
+            address appContract = apps[i];
+            
+            // Skip if not registered
+            if (!_isRegistered[appContract]) {
+                continue;
+            }
+            
+            AppInstance storage instance = _appInstances[appContract];
+            
+            // Skip if not active or inactive
+            if (
+                instance.status != InstanceStatus.Active &&
+                instance.status != InstanceStatus.Inactive
+            ) {
+                continue;
+            }
+            
+            // Update heartbeat (minimal storage update)
+            instance.lastHeartbeat = timestamp;
+            
+            // Reactivate if was inactive
+            if (instance.status == InstanceStatus.Inactive) {
+                instance.status = InstanceStatus.Active;
+            }
+        }
+        
+        emit BatchHeartbeatUpdated(apps, timestamp);
+    }
+
+    /**
+     * @inheritdoc INovaRegistry
+     */
     function migrateAppBudget(
         address appContract,
         bytes32 newAppId

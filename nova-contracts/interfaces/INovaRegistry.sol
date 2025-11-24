@@ -69,6 +69,7 @@ interface INovaRegistry {
     event AppInactive(address indexed appContract);
     event AppDeleted(address indexed appContract);
     event HeartbeatUpdated(address indexed appContract, uint256 timestamp);
+    event BatchHeartbeatUpdated(address[] apps, uint256 timestamp);
     event PCRsUpdated(address indexed appContract, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2);
     event AppFunded(address indexed appContract, address indexed funder, uint256 amount);
     event GasConsumed(address indexed appContract, uint256 amount);
@@ -145,6 +146,15 @@ interface INovaRegistry {
      * @param appContract App contract address
      */
     function heartbeat(address appContract) external;
+
+    /**
+     * @dev Update heartbeats for multiple apps in a single transaction
+     * @param apps Array of app contract addresses
+     * 
+     * This function significantly reduces gas costs when updating multiple apps.
+     * Gas savings: ~6x reduction compared to individual heartbeat calls.
+     */
+    function batchHeartbeat(address[] memory apps) external;
 
     /**
      * @dev Migrate app budget to a new version

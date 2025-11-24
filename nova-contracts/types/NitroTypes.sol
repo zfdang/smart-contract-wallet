@@ -3,9 +3,22 @@ pragma solidity ^0.8.24;
 
 /**
  * @title Nitro Enclave Attestation Types
- * @notice Type definitions for AWS Nitro Enclave attestation verification
+ * @notice Type definitions for TEE attestation verification (AWS Nitro, Intel SGX, AMD SEV)
  * @dev These types are used for zero-knowledge proof verification of attestation reports
  */
+
+/**
+ * @dev Enumeration of supported Trusted Execution Environment (TEE) types
+ * Used to specify which TEE vendor's attestation is being verified
+ */
+enum TEEType {
+    // AWS Nitro Enclaves
+    NitroEnclave,
+    // Intel Software Guard Extensions (SGX)
+    IntelSGX,
+    // AMD Secure Encrypted Virtualization (SEV-SNP)
+    AMDSEV
+}
 
 /**
  * @dev Enumeration of supported zero-knowledge proof coprocessor types

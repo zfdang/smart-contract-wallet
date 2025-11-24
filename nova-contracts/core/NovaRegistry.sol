@@ -14,7 +14,8 @@ import {
 import {INovaRegistry} from "../interfaces/INovaRegistry.sol";
 import {INovaApp} from "../interfaces/INovaApp.sol";
 import {INitroEnclaveVerifier} from "../interfaces/INitroEnclaveVerifier.sol";
-import {ZkCoProcessorType, VerifierJournal, Pcr} from "../types/NitroTypes.sol";
+import {ITEEVerifier} from "../interfaces/ITEEVerifier.sol";
+import {ZkCoProcessorType, VerifierJournal, Pcr, TEEType} from "../types/NitroTypes.sol";
 import {AttestationLib} from "../libraries/AttestationLib.sol";
 
 /**
@@ -47,7 +48,10 @@ contract NovaRegistry is
     /// @dev Role for Paymaster to deduct gas
     bytes32 public constant PAYMASTER_ROLE = keccak256("PAYMASTER_ROLE");
 
-    /// @dev Nitro Enclave attestation verifier contract
+    /// @dev Mapping of TEE type to verifier contract
+    mapping(TEEType => ITEEVerifier) public teeVerifiers;
+    
+    /// @dev Legacy Nitro Enclave attestation verifier contract (deprecated, use teeVerifiers)
     INitroEnclaveVerifier public verifier;
 
     /// @dev Heartbeat interval in seconds (default: 1 hour)
@@ -190,9 +194,9 @@ contract NovaRegistry is
      */
     function activateApp(
         address appContract,
-        bytes calldata output,
-        ZkCoProcessorType zkCoprocessor,
-        bytes calldata proofBytes
+        TEEType teeType,
+        bytes calldata attestation,
+        bytes calldata proof
     ) external override onlyRole(PLATFORM_ROLE) {
         if (!_isRegistered[appContract]) {
             revert AppNotFound();
@@ -204,11 +208,16 @@ contract NovaRegistry is
             revert AppNotFound();
         }
 
-        // Verify attestation using ZK proof
-        VerifierJournal memory journal = verifier.verify(
-            output,
-            zkCoprocessor,
-            proofBytes
+        // Get the appropriate TEE verifier
+        ITEEVerifier teeVerifier = teeVerifiers[teeType];
+        if (address(teeVerifier) == address(0)) {
+            revert TEEVerifierNotRegistered();
+        }
+
+        // Verify attestation using TEE-specific verifier
+        VerifierJournal memory journal = teeVerifier.verify(
+            attestation,
+            proof
         );
 
         // Validate and consume attestation to prevent replay attacks
@@ -232,6 +241,7 @@ contract NovaRegistry is
         instance.walletAddress = ethAddress; // Initially same, will be updated when wallet is deployed
         instance.status = InstanceStatus.Active;
         instance.lastHeartbeat = block.timestamp;
+        instance.teeType = teeType; // Store which TEE vendor was used
 
         // Set operator in app contract
         INovaApp(appContract).setOperator(ethAddress);
@@ -617,6 +627,35 @@ contract NovaRegistry is
     ) external onlyRole(ADMIN_ROLE) {
         heartbeatInterval = _heartbeatInterval;
         heartbeatExpiry = _heartbeatExpiry;
+    }
+
+    /**
+     * @dev Register or update a TEE verifier for a specific TEE type
+     * @param teeType Type of TEE (NitroEnclave, IntelSGX, or AMDSEV)
+     * @param verifierAddress Address of the TEE verifier contract
+     */
+    function registerTEEVerifier(
+        TEEType teeType,
+        address verifierAddress
+    ) external onlyRole(ADMIN_ROLE) {
+        if (verifierAddress == address(0)) {
+            revert InvalidTEEVerifier();
+        }
+
+        // Verify the contract implements ITEEVerifier
+        ITEEVerifier newVerifier = ITEEVerifier(verifierAddress);
+        
+        // Verify the verifier reports the correct TEE type
+        require(newVerifier.getTEEType() == teeType, "TEEType mismatch");
+
+        address oldVerifier = address(teeVerifiers[teeType]);
+        teeVerifiers[teeType] = newVerifier;
+
+        if (oldVerifier == address(0)) {
+            emit TEEVerifierRegistered(teeType, verifierAddress);
+        } else {
+            emit TEEVerifierUpdated(teeType, oldVerifier, verifierAddress);
+        }
     }
 
     /**

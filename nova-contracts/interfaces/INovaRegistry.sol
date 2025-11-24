@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.24;
 
-import {ZkCoProcessorType} from "../types/NitroTypes.sol";
+import {ZkCoProcessorType, TEEType} from "../types/NitroTypes.sol";
 
 /**
  * @title INovaRegistry
@@ -45,6 +45,7 @@ interface INovaRegistry {
         uint256 gasBudget; // Gas budget (wei)
         uint256 lastHeartbeat; // Last heartbeat timestamp
         uint256 registeredAt; // Registration timestamp
+        TEEType teeType; // TEE vendor type used for activation
     }
 
     // Events
@@ -63,6 +64,8 @@ interface INovaRegistry {
     event AttestationConsumed(
         address indexed appContract, bytes32 indexed attestationHash, bytes32 indexed nonceHash, uint64 timestamp
     );
+    event TEEVerifierRegistered(TEEType indexed teeType, address indexed verifier);
+    event TEEVerifierUpdated(TEEType indexed teeType, address indexed oldVerifier, address indexed newVerifier);
 
     // Errors
     error AppAlreadyRegistered();
@@ -76,6 +79,8 @@ interface INovaRegistry {
     error NonceAlreadyUsed();
     error AttestationExpired();
     error AttestationFromFuture();
+    error TEEVerifierNotRegistered();
+    error InvalidTEEVerifier();
 
     /**
      * @dev Register a new app with PCRs
@@ -89,15 +94,15 @@ interface INovaRegistry {
     /**
      * @dev Activate an app instance after attestation verification
      * @param appContract App contract address
-     * @param output Encoded VerifierJournal
-     * @param zkCoprocessor ZK coprocessor type
-     * @param proofBytes ZK proof data
+     * @param teeType TEE vendor type (NitroEnclave, IntelSGX, or AMDSEV)
+     * @param attestation Raw attestation data (format varies by TEE type)
+     * @param proof Zero-knowledge or cryptographic proof data
      */
     function activateApp(
         address appContract,
-        bytes calldata output,
-        ZkCoProcessorType zkCoprocessor,
-        bytes calldata proofBytes
+        TEEType teeType,
+        bytes calldata attestation,
+        bytes calldata proof
     ) external;
 
     /**

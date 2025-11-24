@@ -31,37 +31,48 @@ The Nova TEE Platform is an innovative infrastructure that bridges **Trusted Exe
 
 ## Architecture Overview
 
-```mermaid
-graph TD
-    subgraph AWS_Nitro_Enclave["AWS Nitro Enclave"]
-        direction TB
-        UserApp["User Application<br/>- Generates temporary wallet keypair<br/>- Produces attestation report<br/>- Signs UserOperations"]
-    end
-
-    subgraph Nova_Platform["Nova Platform (Off-Chain)"]
-        direction TB
-        PlatformLogic["- Obtains attestation from enclave<br/>- Generates ZK proof via coprocessor<br/>- Calls on-chain contracts<br/>- Monitors heartbeat"]
-    end
-
-    subgraph On_Chain["On-Chain Contracts (Base Sepolia)"]
-        direction TB
-        NovaRegistry["NovaRegistry<br/>(UUPS Proxy)<br/>← Verifies ZK proofs<br/>← Manages app lifecycle<br/>← Tracks gas budgets"]
-        AppWalletFactory["AppWalletFactory<br/>(Deploys EIP-4337 wallets)"]
-        NovaPaymaster["NovaPaymaster<br/>(Sponsors gas for apps)"]
-        
-        AppContract["App Contract<br/>(INovaApp)"]
-        AppWallet["AppWallet<br/>(EIP-4337)"]
-    end
-
-    UserApp -->|Attestation Report| PlatformLogic
-    PlatformLogic -->|ZK Proof + Attestation| NovaRegistry
-    
-    NovaRegistry --> AppWalletFactory
-    NovaRegistry --> NovaPaymaster
-    
-    AppWalletFactory -->|Deploys| AppWallet
-    AppWallet -->|Controls| AppContract
-    NovaPaymaster -.->|Sponsors| AppWallet
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    AWS Nitro Enclave                          │
+│  ┌────────────────────────────────────────────────────┐      │
+│  │  User Application                                  │      │
+│  │  - Generates temporary wallet keypair             │      │
+│  │  - Produces attestation report                    │      │
+│  │  - Signs UserOperations                           │      │
+│  └────────────────────────────────────────────────────┘      │
+└──────────────────────────────────────────────────────────────┘
+                            ↓
+                    [Attestation Report]
+                            ↓
+┌──────────────────────────────────────────────────────────────┐
+│               Nova Platform (Off-Chain)                       │
+│  - Obtains attestation from enclave                          │
+│  - Generates ZK proof via coprocessor                        │
+│  - Calls on-chain contracts                                  │
+│  - Monitors heartbeat                                        │
+└──────────────────────────────────────────────────────────────┘
+                            ↓
+                   [ZK Proof + Attestation]
+                            ↓
+┌──────────────────────────────────────────────────────────────┐
+│              On-Chain Contracts (Base Sepolia)                │
+│                                                               │
+│  ┌─────────────────┐                                         │
+│  │  NovaRegistry   │  ← Verifies ZK proofs                  │
+│  │   (UUPS Proxy)  │  ← Manages app lifecycle               │
+│  └────────┬────────┘  ← Tracks gas budgets                  │
+│           │                                                   │
+│           ├──────────► AppWalletFactory                      │
+│           │            (Deploys EIP-4337 wallets)            │
+│           │                                                   │
+│           └──────────► NovaPaymaster                         │
+│                        (Sponsors gas for apps)               │
+│                                                               │
+│  ┌─────────────────┐         ┌──────────────────┐          │
+│  │   App Contract  │◄───────┤   AppWallet      │          │
+│  │  (INovaApp)     │         │   (EIP-4337)     │          │
+│  └─────────────────┘         └──────────────────┘          │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ## Key Design Decisions
@@ -361,27 +372,27 @@ sequenceDiagram
 
 ### Trust Boundaries
 
-```mermaid
-graph TD
-    subgraph Trusted["Trusted Components"]
-        Nitro["AWS Nitro Enclave hardware"]
-        ZK["ZK Verifier contract"]
-        EntryPoint["EIP-4337 EntryPoint"]
-    end
+```
+┌─────────────────────────────────────────┐
+│   Trusted Components                    │
+│   - AWS Nitro Enclave hardware         │
+│   - ZK Verifier contract                │
+│   - EIP-4337 EntryPoint                 │
+└─────────────────────────────────────────┘
 
-    subgraph SemiTrusted["Semi-Trusted Components"]
-        Platform["Nova Platform (PLATFORM_ROLE)<br/>Can: Activate apps, heartbeat<br/>Cannot: Modify app data, steal funds"]
-    end
+┌─────────────────────────────────────────┐
+│   Semi-Trusted Components               │
+│   - Nova Platform (PLATFORM_ROLE)       │
+│     Can: Activate apps, heartbeat       │
+│     Cannot: Modify app data, steal funds│
+└─────────────────────────────────────────┘
 
-    subgraph Untrusted["Untrusted Components"]
-        Devs["App developers"]
-        Ops["App operators"]
-        Users["General users"]
-    end
-    
-    style Trusted fill:#d4edda,stroke:#28a745,stroke-width:2px
-    style SemiTrusted fill:#fff3cd,stroke:#ffc107,stroke-width:2px
-    style Untrusted fill:#f8d7da,stroke:#dc3545,stroke-width:2px
+┌─────────────────────────────────────────┐
+│   Untrusted Components                  │
+│   - App developers                      │
+│   - App operators                       │
+│   - General users                       │
+└─────────────────────────────────────────┘
 ```
 
 ### Attack Surface Analysis

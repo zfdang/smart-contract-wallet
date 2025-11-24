@@ -89,6 +89,7 @@ interface INovaRegistry {
         bytes32 indexed toAppId,
         uint256 amount
     );
+    event AttestationsCleaned(uint256 count);
 
     // Errors
     error AppAlreadyRegistered();
@@ -177,6 +178,16 @@ interface INovaRegistry {
      * @param appContract App contract address
      */
     function deleteApp(address appContract) external;
+
+    /**
+     * @dev Clean up expired attestations to free storage
+     * @param attestationHashes Array of attestation hashes to clean up
+     * 
+     * This function can be called by anyone to remove attestations older than
+     * ATTESTATION_RETENTION_PERIOD (7 days) from storage. Helps prevent
+     * unbounded storage growth.
+     */
+    function cleanupExpiredAttestations(bytes32[] memory attestationHashes) external;
 
     /**
      * @dev Get all app instances with specific PCRs

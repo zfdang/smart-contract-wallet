@@ -78,8 +78,14 @@ contract NovaRegistry is
     /// @dev Tracks used nonces to prevent replay attacks (extra layer)
     mapping(bytes32 => bool) private _usedNonces;
 
+    /// @dev Tracks attestation timestamps for cleanup (attestationHash => timestamp)
+    mapping(bytes32 => uint256) private _attestationTimestamps;
+
     /// @dev Time window for attestation validity (5 minutes)
     uint256 public constant ATTESTATION_VALIDITY_WINDOW = 5 minutes;
+
+    /// @dev Attestation retention period before cleanup (7 days)
+    uint256 public constant ATTESTATION_RETENTION_PERIOD = 7 days;
 
     /// @dev Mapping of appId to version information
     mapping(bytes32 => AppVersion) private _appVersions;
@@ -319,6 +325,9 @@ contract NovaRegistry is
         _usedAttestations[attestationHash] = true;
         _usedNonces[nonceHash] = true;
 
+        // 6. Record timestamp for cleanup
+        _attestationTimestamps[attestationHash] = block.timestamp;
+
         emit AttestationConsumed(
             appContract,
             attestationHash,
@@ -540,6 +549,35 @@ contract NovaRegistry is
         instance.status = InstanceStatus.Deleted;
 
         emit AppDeleted(appContract);
+    }
+
+    /**
+     * @inheritdoc INovaRegistry
+     */
+    function cleanupExpiredAttestations(bytes32[] memory attestationHashes) external override {
+        uint256 cleanedCount = 0;
+
+        for (uint256 i = 0; i < attestationHashes.length; i++) {
+            bytes32 attestationHash = attestationHashes[i];
+            
+            // Check if attestation exists and has timestamp
+            uint256 timestamp = _attestationTimestamps[attestationHash];
+            if (timestamp == 0) {
+                continue; // Attestation doesn't exist, skip
+            }
+
+            // Check if attestation is old enough to clean up
+            if (block.timestamp > timestamp + ATTESTATION_RETENTION_PERIOD) {
+                // Remove from storage
+                delete _usedAttestations[attestationHash];
+                delete _attestationTimestamps[attestationHash];
+                cleanedCount++;
+            }
+        }
+
+        if (cleanedCount > 0) {
+            emit AttestationsCleaned(cleanedCount);
+        }
     }
 
     /**

@@ -101,8 +101,13 @@ app.initialize(pcr0, pcr1, pcr2);
 ### 2. Publisher Registers App with Nova
 
 ```solidity
-// Register app with Nova platform
-novaRegistry.registerApp(address(app), pcr0, pcr1, pcr2);
+// Register app with Nova platform (v1.0.0)
+novaRegistry.registerApp(
+    address(app), 
+    pcr0, pcr1, pcr2, 
+    bytes32(0), // No previous version
+    "v1.0.0"    // Semantic version
+);
 ```
 
 At this point, the app is in `Registered` status, waiting for activation.
@@ -123,10 +128,11 @@ The Nova platform:
 
 ```solidity
 // Nova platform activates the app
+// Nova platform activates the app
 novaRegistry.activateApp(
     address(app),
+    TEEType.NitroEnclave,
     attestationOutput,
-    ZkCoProcessorType.RiscZero,
     zkProof
 );
 ```
@@ -250,39 +256,32 @@ To create a Nova-compatible app contract, implement the `INovaApp` interface:
 ```solidity
 contract MyApp is INovaApp {
     address public immutable override publisher;
-    address public immutable override novaPlatform;
-    address public override operator;
+    address public override novaPlatform;
     
-    bytes32 public pcr0;
-    bytes32 public pcr1;
-    bytes32 public pcr2;
+    bytes32 public override pcr0;
+    bytes32 public override pcr1;
+    bytes32 public override pcr2;
     
     constructor(address _publisher, address _novaPlatform) {
         publisher = _publisher;
         novaPlatform = _novaPlatform;
     }
     
-    function setOperator(address _operator) external override {
-        require(msg.sender == novaPlatform, "Unauthorized");
-        operator = _operator;
-    }
-    
-    function requestPCRUpdate(bytes32 _pcr0, bytes32 _pcr1, bytes32 _pcr2) 
+    function initialize(bytes32 _pcr0, bytes32 _pcr1, bytes32 _pcr2) 
         external override 
     {
         require(msg.sender == publisher, "Unauthorized");
+        require(pcr0 == bytes32(0), "Already initialized");
         pcr0 = _pcr0;
         pcr1 = _pcr1;
         pcr2 = _pcr2;
-        INovaRegistry(novaPlatform).updatePCRs(address(this), _pcr0, _pcr1, _pcr2);
     }
     
-    function getPCRs() external view override 
-        returns (bytes32, bytes32, bytes32) 
-    {
-        return (pcr0, pcr1, pcr2);
+    function updatePlatform(address _novaPlatform) external override {
+        require(msg.sender == publisher, "Unauthorized");
+        novaPlatform = _novaPlatform;
     }
-    
+
     // Your business logic here
 }
 ```

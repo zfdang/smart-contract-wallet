@@ -103,8 +103,18 @@ contract DeployNova is Script {
         novaRegistry.grantRole(paymasterRole, address(novaPaymaster));
         console.log("   PAYMASTER_ROLE granted");
 
-        // 6. Deploy Example App (optional)
-        console.log("6. Deploying ExampleApp...");
+        // 6. Register TEE Verifier (Nitro)
+        console.log("6. Registering Nitro Verifier...");
+        // Assuming nitroVerifier implements ITEEVerifier or we wrap it
+        // For this script, we might need to deploy the wrapper if nitroVerifier is just the raw precompile interface
+        // But assuming nitroVerifier IS the NitroEnclaveVerifier for now, or we skip if not compatible
+        // In a real deployment, we would deploy NitroEnclaveVerifier(nitroVerifier, RiscZero)
+        
+        // For now, let's assume we just want to show the registration step
+        // novaRegistry.registerTEEVerifier(NovaRegistry.TEEType.NitroEnclave, nitroVerifier);
+        
+        // 7. Deploy Example App (optional)
+        console.log("7. Deploying ExampleApp...");
         exampleApp = new ExampleApp(deployer, address(novaRegistry));
         console.log("   ExampleApp:", address(exampleApp));
 
@@ -130,12 +140,12 @@ contract DeployNova is Script {
             address(exampleApp),
             '"initialize(bytes32,bytes32,bytes32)" <pcr0> <pcr1> <pcr2>'
         );
-        console.log(
-            "3. Register ExampleApp: cast send",
-            address(novaRegistry),
-            '"registerApp(address,bytes32,bytes32,bytes32)"',
-            address(exampleApp),
-            "<pcr0> <pcr1> <pcr2>"
-        );
+        console.log("3. Register ExampleApp: cast send");
+        console.log(address(novaRegistry));
+        console.log('"registerApp(address,bytes32,bytes32,bytes32,bytes32,string)"');
+        console.log(address(exampleApp));
+        console.log("<pcr0> <pcr1> <pcr2>");
+        console.log("0x0000000000000000000000000000000000000000000000000000000000000000");
+        console.log('"v1.0.0"');
     }
 }

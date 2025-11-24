@@ -97,11 +97,19 @@ contract NovaPaymaster is IPaymaster, AccessControl {
             return ("", 1); // Invalid paymaster data
         }
 
-        address appContract;
-        assembly {
-            // Skip first 20 bytes (paymaster address), read next 20 bytes
-            appContract := shr(96, calldataload(add(userOp.paymasterAndData.offset, 20)))
+        // Extract app contract address from paymasterAndData
+        // Format: [paymaster_address(20)][app_contract(20)][...]
+        if (userOp.paymasterAndData.length < 40) {
+            return ("", 1); // Invalid paymaster data
         }
+
+        address appContract;
+        // We can use slicing since we are in 0.8.x and it's calldata
+        // bytes calldata paymasterAndData = userOp.paymasterAndData;
+        // appContract = address(bytes20(paymasterAndData[20:40]));
+        
+        // Alternatively, to be safe and explicit:
+        appContract = address(bytes20(userOp.paymasterAndData[20:40]));
 
         // Get app instance from registry
         INovaRegistry.AppInstance memory instance;

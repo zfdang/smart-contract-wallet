@@ -515,7 +515,7 @@ The Nova Platform will automatically submit the activation transaction:
 cast send $NOVA_REGISTRY_ADDRESS \
     "activateApp(address,uint8,bytes,bytes)" \
     $APP_CONTRACT \
-    0 \  # TEEType: 0=NitroEnclave, 1=IntelSGX, 2=AMDSEV
+    0 \
     $(cat attestation.bin | xxd -p | tr -d '\n') \
     $(cat proof.bin | xxd -p | tr -d '\n') \
     --rpc-url $RPC_URL \
@@ -727,7 +727,7 @@ cast send $NOVA_REGISTRY_ADDRESS \
     $NEW_PCR0 \
     $NEW_PCR1 \
     $NEW_PCR2 \
-    $OLD_APP_ID \  # ⬅️ Link to previous version
+    $OLD_APP_ID \
     "v1.0.1" \
     --rpc-url $RPC_URL \
     --private-key $PRIVATE_KEY

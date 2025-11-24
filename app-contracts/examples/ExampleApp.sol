@@ -32,6 +32,9 @@ contract ExampleApp is INovaApp {
     bytes32 public override pcr1;
     bytes32 public override pcr2;
 
+    /// @dev Operator address (set by platform)
+    address public operator;
+
     // ============================================
     // Modifiers
     // ============================================
@@ -106,6 +109,16 @@ contract ExampleApp is INovaApp {
         novaPlatform = _novaPlatform;
 
         emit PlatformUpdated(oldPlatform, _novaPlatform);
+    }
+
+    /**
+     * @inheritdoc INovaApp
+     */
+    function setOperator(address _operator) external override {
+        if (msg.sender != novaPlatform) {
+            revert Unauthorized();
+        }
+        operator = _operator;
     }
 
     // ============================================

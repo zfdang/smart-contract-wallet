@@ -12,7 +12,7 @@ import {
 } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 import {INovaRegistry} from "../interfaces/INovaRegistry.sol";
-import {INovaApp} from "../interfaces/INovaApp.sol";
+import {INovaApp} from "../../app-contracts/interfaces/INovaApp.sol";
 import {INitroEnclaveVerifier} from "../interfaces/INitroEnclaveVerifier.sol";
 import {ITEEVerifier} from "../interfaces/ITEEVerifier.sol";
 import {ZkCoProcessorType, VerifierJournal, Pcr, TEEType} from "../types/NitroTypes.sol";
@@ -100,33 +100,25 @@ contract NovaRegistry is
 
     /**
      * @dev Initializes the contract
-     * @param _verifier Address of the Nitro Enclave verifier contract
      * @param _admin Address to be granted admin role
-     * @param _platform Address to be granted platform role
      */
     function initialize(
-        address _verifier,
-        address _admin,
-        address _platform
+        address _admin
     ) public initializer {
-        __UUPSUpgradeable_init();
         __AccessControl_init();
 
-        if (
-            _verifier == address(0) ||
-            _admin == address(0) ||
-            _platform == address(0)
-        ) {
+        if (_admin == address(0)) {
             revert InvalidAppContract();
         }
 
-        verifier = INitroEnclaveVerifier(_verifier);
-        heartbeatInterval = 1 hours;
-        heartbeatExpiry = 24 hours;
-
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(ADMIN_ROLE, _admin);
-        _grantRole(PLATFORM_ROLE, _platform);
+        // Grant PLATFORM_ROLE to admin initially so they can setup the system
+        _grantRole(PLATFORM_ROLE, _admin);
+        
+        // Initialize heartbeat config
+        heartbeatInterval = 24 hours;
+        heartbeatExpiry = 1 hours;
     }
 
     /**

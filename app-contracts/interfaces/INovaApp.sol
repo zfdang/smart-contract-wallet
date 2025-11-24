@@ -129,4 +129,13 @@ interface INovaApp {
      * @notice Use this to upgrade to a new NovaRegistry deployment
      */
     function updatePlatform(address _novaPlatform) external;
+
+    /**
+     * @dev Set the operator address
+     * @param _operator New operator address
+     *
+     * Requirements:
+     * - Only callable by the Nova platform
+     */
+    function setOperator(address _operator) external;
 }

@@ -5,7 +5,9 @@ import "forge-std/Test.sol";
 import {NovaRegistry} from "../nova-contracts/core/NovaRegistry.sol";
 import {INovaRegistry} from "../nova-contracts/interfaces/INovaRegistry.sol";
 import {INitroEnclaveVerifier} from "../nova-contracts/interfaces/INitroEnclaveVerifier.sol";
-import {ZkCoProcessorType, VerifierJournal, Pcr, Bytes48, VerificationResult} from "../nova-contracts/types/NitroTypes.sol";
+import {ZkCoProcessorType, VerifierJournal, Pcr, Bytes48, VerificationResult, TEEType, ZkCoProcessorConfig} from "../nova-contracts/types/NitroTypes.sol";
+import {ITEEVerifier} from "../nova-contracts/interfaces/ITEEVerifier.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
  * @title NovaRegistry Replay Protection Tests
@@ -28,11 +30,21 @@ contract NovaRegistryReplayTest is Test {
     function setUp() public {
         // Deploy contracts
         mockVerifier = new MockVerifier();
-        registry = new NovaRegistry();
+        NovaRegistry implementation = new NovaRegistry();
         
-        // Initialize registry
-        vm.prank(admin);
-        registry.initialize(address(mockVerifier), admin, platform);
+        // Deploy proxy
+        bytes memory initData = abi.encodeWithSelector(NovaRegistry.initialize.selector, admin);
+        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
+        registry = NovaRegistry(address(proxy));
+        
+        // Register mock verifier and grant roles
+        vm.startPrank(admin);
+        registry.registerTEEVerifier(TEEType.NitroEnclave, address(mockVerifier));
+        registry.grantRole(registry.PLATFORM_ROLE(), platform);
+        vm.stopPrank();
+
+        // Warp time to avoid underflow in tests
+        vm.warp(1 hours);
         
         // Deploy test apps
         app1 = new MockApp(admin, address(registry));
@@ -40,8 +52,8 @@ contract NovaRegistryReplayTest is Test {
         
         // Register apps
         vm.startPrank(admin);
-        registry.registerApp(address(app1), PCR0, PCR1, PCR2);
-        registry.registerApp(address(app2), PCR0, PCR1, PCR2);
+        registry.registerApp(address(app1), PCR0, PCR1, PCR2, bytes32(0), "v1.0.0");
+        registry.registerApp(address(app2), PCR0, PCR1, PCR2, bytes32(0), "v1.0.0");
         vm.stopPrank();
     }
     
@@ -90,7 +102,7 @@ contract NovaRegistryReplayTest is Test {
         bytes memory proof = bytes("proof");
         
         vm.prank(platform);
-        registry.activateApp(address(app1), output, ZkCoProcessorType.RiscZero, proof);
+        registry.activateApp(address(app1), TEEType.NitroEnclave, output, proof);
         
         // Verify app is active
         INovaRegistry.AppInstance memory instance = registry.getAppInstance(address(app1));
@@ -113,12 +125,12 @@ contract NovaRegistryReplayTest is Test {
         
         // First activation succeeds
         vm.prank(platform);
-        registry.activateApp(address(app1), output, ZkCoProcessorType.RiscZero, proof);
+        registry.activateApp(address(app1), TEEType.NitroEnclave, output, proof);
         
         // Second activation with same attestation fails
         vm.prank(platform);
         vm.expectRevert(INovaRegistry.AttestationAlreadyUsed.selector);
-        registry.activateApp(address(app2), output, ZkCoProcessorType.RiscZero, proof);
+        registry.activateApp(address(app2), TEEType.NitroEnclave, output, proof);
     }
     
     /**
@@ -136,7 +148,7 @@ contract NovaRegistryReplayTest is Test {
         bytes memory proof1 = bytes("proof1");
         
         vm.prank(platform);
-        registry.activateApp(address(app1), output1, ZkCoProcessorType.RiscZero, proof1);
+        registry.activateApp(address(app1), TEEType.NitroEnclave, output1, proof1);
         
         // Second attestation with same nonce but different data
         VerifierJournal memory journal2 = _createJournal(timestamp, nonce, address(0x999));
@@ -149,7 +161,7 @@ contract NovaRegistryReplayTest is Test {
         // Should fail due to nonce reuse
         vm.prank(platform);
         vm.expectRevert(INovaRegistry.NonceAlreadyUsed.selector);
-        registry.activateApp(address(app2), output2, ZkCoProcessorType.RiscZero, proof2);
+        registry.activateApp(address(app2), TEEType.NitroEnclave, output2, proof2);
     }
     
     /**
@@ -168,7 +180,7 @@ contract NovaRegistryReplayTest is Test {
         
         vm.prank(platform);
         vm.expectRevert(INovaRegistry.AttestationExpired.selector);
-        registry.activateApp(address(app1), output, ZkCoProcessorType.RiscZero, proof);
+        registry.activateApp(address(app1), TEEType.NitroEnclave, output, proof);
     }
     
     /**
@@ -187,7 +199,7 @@ contract NovaRegistryReplayTest is Test {
         
         vm.prank(platform);
         vm.expectRevert(INovaRegistry.AttestationFromFuture.selector);
-        registry.activateApp(address(app1), output, ZkCoProcessorType.RiscZero, proof);
+        registry.activateApp(address(app1), TEEType.NitroEnclave, output, proof);
     }
     
     /**
@@ -205,7 +217,7 @@ contract NovaRegistryReplayTest is Test {
         bytes memory proof = bytes("proof");
         
         vm.prank(platform);
-        registry.activateApp(address(app1), output, ZkCoProcessorType.RiscZero, proof);
+        registry.activateApp(address(app1), TEEType.NitroEnclave, output, proof);
         
         // Verify success
         INovaRegistry.AppInstance memory instance = registry.getAppInstance(address(app1));
@@ -227,7 +239,7 @@ contract NovaRegistryReplayTest is Test {
         bytes memory proof = bytes("proof");
         
         vm.prank(platform);
-        registry.activateApp(address(app1), output, ZkCoProcessorType.RiscZero, proof);
+        registry.activateApp(address(app1), TEEType.NitroEnclave, output, proof);
         
         // Verify success
         INovaRegistry.AppInstance memory instance = registry.getAppInstance(address(app1));
@@ -246,7 +258,7 @@ contract NovaRegistryReplayTest is Test {
         mockVerifier.setJournal(journal1);
         
         vm.prank(platform);
-        registry.activateApp(address(app1), abi.encode(journal1), ZkCoProcessorType.RiscZero, bytes("proof1"));
+        registry.activateApp(address(app1), TEEType.NitroEnclave, abi.encode(journal1), bytes("proof1"));
         
         // Second attestation with nonce-2
         bytes memory nonce2 = abi.encodePacked(keccak256("nonce-2"));
@@ -254,7 +266,7 @@ contract NovaRegistryReplayTest is Test {
         mockVerifier.setJournal(journal2);
         
         vm.prank(platform);
-        registry.activateApp(address(app2), abi.encode(journal2), ZkCoProcessorType.RiscZero, bytes("proof2"));
+        registry.activateApp(address(app2), TEEType.NitroEnclave, abi.encode(journal2), bytes("proof2"));
         
         // Both should be active
         assertEq(uint256(registry.getAppInstance(address(app1)).status), uint256(INovaRegistry.InstanceStatus.Active));
@@ -275,18 +287,19 @@ contract NovaRegistryReplayTest is Test {
         bytes memory proof = bytes("proof");
         
         // Expect AttestationConsumed event
-        vm.expectEmit(true, true, true, true);
-        // Note: We can't predict exact hash, so we just check event is emitted
+        // Check index 1 (appContract) only, ignore hashes and timestamp
+        vm.expectEmit(true, false, false, false);
+        emit INovaRegistry.AttestationConsumed(address(app1), bytes32(0), bytes32(0), 0);
         
         vm.prank(platform);
-        registry.activateApp(address(app1), output, ZkCoProcessorType.RiscZero, proof);
+        registry.activateApp(address(app1), TEEType.NitroEnclave, output, proof);
     }
 }
 
 /**
  * @dev Mock Verifier for testing
  */
-contract MockVerifier is INitroEnclaveVerifier {
+contract MockVerifier is INitroEnclaveVerifier, ITEEVerifier {
     VerifierJournal private _journal;
     
     function setJournal(VerifierJournal memory journal) external {
@@ -339,6 +352,22 @@ contract MockVerifier is INitroEnclaveVerifier {
     
     function getZkConfig(ZkCoProcessorType) external pure returns (ZkCoProcessorConfig memory) {
         revert("Not implemented");
+    }
+
+    
+    function getTEEType() external pure override returns (TEEType) {
+        return TEEType.NitroEnclave;
+    }
+
+    function isAttestationValid(bytes calldata, uint256) external pure override returns (bool) {
+        return true;
+    }
+
+    function verify(bytes calldata attestation, bytes calldata) external view override returns (VerifierJournal memory) {
+        // Decode attestation to get journal (mock behavior)
+        // In real verifier, this would verify the proof
+        VerifierJournal memory journal = abi.decode(attestation, (VerifierJournal));
+        return journal;
     }
 }
 

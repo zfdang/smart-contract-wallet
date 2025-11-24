@@ -32,6 +32,17 @@ interface INovaRegistry {
     }
 
     /**
+     * @dev App version information for tracking PCR evolution
+     */
+    struct AppVersion {
+        bytes32 appId;           // keccak256(pcr0, pcr1, pcr2)
+        bytes32 previousAppId;   // Link to previous version (bytes32(0) for first version)
+        uint256 deployedAt;      // Timestamp when this version was deployed
+        string semanticVersion;  // Human-readable version "v1.2.3"
+        bool deprecated;         // Mark old versions as deprecated after migration
+    }
+
+    /**
      * @dev App instance structure
      */
     struct AppInstance {
@@ -66,6 +77,18 @@ interface INovaRegistry {
     );
     event TEEVerifierRegistered(TEEType indexed teeType, address indexed verifier);
     event TEEVerifierUpdated(TEEType indexed teeType, address indexed oldVerifier, address indexed newVerifier);
+    event AppVersionLinked(
+        address indexed appContract,
+        bytes32 indexed newAppId,
+        bytes32 indexed previousAppId,
+        string semanticVersion
+    );
+    event BudgetMigrated(
+        address indexed appContract,
+        bytes32 indexed fromAppId,
+        bytes32 indexed toAppId,
+        uint256 amount
+    );
 
     // Errors
     error AppAlreadyRegistered();
@@ -81,15 +104,26 @@ interface INovaRegistry {
     error AttestationFromFuture();
     error TEEVerifierNotRegistered();
     error InvalidTEEVerifier();
+    error InvalidVersionChain();
+    error InvalidSemanticVersion();
 
     /**
-     * @dev Register a new app with PCRs
+     * @dev Register a new app with PCRs and version information
      * @param appContract Address of the app contract
      * @param pcr0 PCR0 value
      * @param pcr1 PCR1 value
      * @param pcr2 PCR2 value
+     * @param previousAppId Previous version's appId (bytes32(0) for first version)
+     * @param semanticVersion Semantic version string (e.g., "v1.0.0")
      */
-    function registerApp(address appContract, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) external;
+    function registerApp(
+        address appContract,
+        bytes32 pcr0,
+        bytes32 pcr1,
+        bytes32 pcr2,
+        bytes32 previousAppId,
+        string calldata semanticVersion
+    ) external;
 
     /**
      * @dev Activate an app instance after attestation verification
@@ -112,13 +146,25 @@ interface INovaRegistry {
     function heartbeat(address appContract) external;
 
     /**
-     * @dev Update PCRs for an app
+     * @dev Migrate app budget to a new version
      * @param appContract App contract address
-     * @param pcr0 New PCR0 value
-     * @param pcr1 New PCR1 value
-     * @param pcr2 New PCR2 value
+     * @param newAppId New version's appId (must be linked to current version)
      */
-    function updatePCRs(address appContract, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) external;
+    function migrateAppBudget(address appContract, bytes32 newAppId) external;
+
+    /**
+     * @dev Get version information for an appId
+     * @param appId App identifier
+     * @return AppVersion struct
+     */
+    function getAppVersion(bytes32 appId) external view returns (AppVersion memory);
+
+    /**
+     * @dev Get full version history for an app contract
+     * @param appContract App contract address
+     * @return Array of appIds in chronological order
+     */
+    function getVersionHistory(address appContract) external view returns (bytes32[] memory);
 
     /**
      * @dev Fund an app's gas budget

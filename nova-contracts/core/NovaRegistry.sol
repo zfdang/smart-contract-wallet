@@ -81,6 +81,12 @@ contract NovaRegistry is
     /// @dev Time window for attestation validity (5 minutes)
     uint256 public constant ATTESTATION_VALIDITY_WINDOW = 5 minutes;
 
+    /// @dev Mapping of appId to version information
+    mapping(bytes32 => AppVersion) private _appVersions;
+
+    /// @dev Mapping of appContract to list of all appId versions (chronological)
+    mapping(address => bytes32[]) private _versionHistory;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -124,7 +130,9 @@ contract NovaRegistry is
         address appContract,
         bytes32 pcr0,
         bytes32 pcr1,
-        bytes32 pcr2
+        bytes32 pcr2,
+        bytes32 previousAppId,
+        string calldata semanticVersion
     ) external override {
         if (appContract == address(0)) {
             revert InvalidAppContract();
@@ -150,8 +158,14 @@ contract NovaRegistry is
             revert Unauthorized();
         }
 
+        // Validate semantic version format
+        _validateSemanticVersion(semanticVersion);
+
         // Compute app ID from PCRs
         bytes32 appId = AttestationLib.computeAppId(pcr0, pcr1, pcr2);
+
+        // Validate version chain
+        _validateVersionChain(appContract, appId, previousAppId);
 
         // Initialize app metadata if first instance
         if (_appMetadata[appId].instanceCount == 0) {
@@ -164,6 +178,18 @@ contract NovaRegistry is
                 latestVersion: 0
             });
         }
+
+        // Create version record
+        _appVersions[appId] = AppVersion({
+            appId: appId,
+            previousAppId: previousAppId,
+            deployedAt: block.timestamp,
+            semanticVersion: semanticVersion,
+            deprecated: false
+        });
+
+        // Add to version history
+        _versionHistory[appContract].push(appId);
 
         // Increment instance count and version
         _appMetadata[appId].instanceCount++;
@@ -180,13 +206,15 @@ contract NovaRegistry is
             gasUsed: 0,
             gasBudget: 0,
             lastHeartbeat: 0,
-            registeredAt: block.timestamp
+            registeredAt: block.timestamp,
+            teeType: TEEType.NitroEnclave // Default, will be set during activation
         });
 
         _appIdToContracts[appId].push(appContract);
         _isRegistered[appContract] = true;
 
         emit AppRegistered(appContract, appId, pcr0, pcr1, pcr2);
+        emit AppVersionLinked(appContract, appId, previousAppId, semanticVersion);
     }
 
     /**
@@ -412,64 +440,61 @@ contract NovaRegistry is
     /**
      * @inheritdoc INovaRegistry
      */
-    function updatePCRs(
+    function migrateAppBudget(
         address appContract,
-        bytes32 pcr0,
-        bytes32 pcr1,
-        bytes32 pcr2
+        bytes32 newAppId
     ) external override {
         if (!_isRegistered[appContract]) {
             revert AppNotFound();
         }
 
-        if (pcr0 == bytes32(0) || pcr1 == bytes32(0) || pcr2 == bytes32(0)) {
-            revert InvalidPCRs();
-        }
-
         AppInstance storage instance = _appInstances[appContract];
 
-        // Only publisher can request PCR update via app contract
+        // Only publisher or app contract can migrate
         address publisher = INovaApp(appContract).publisher();
-        if (msg.sender != appContract && msg.sender != publisher) {
+        if (msg.sender != publisher && msg.sender != appContract) {
             revert Unauthorized();
         }
 
-        // Compute new app ID
-        bytes32 newAppId = AttestationLib.computeAppId(pcr0, pcr1, pcr2);
-        bytes32 oldAppId = instance.appId;
+        bytes32 currentAppId = instance.appId;
 
-        // If appId changes, update metadata
-        if (newAppId != oldAppId) {
-            // Decrement old app metadata
-            _appMetadata[oldAppId].instanceCount--;
-
-            // Initialize or update new app metadata
-            if (_appMetadata[newAppId].instanceCount == 0) {
-                _appMetadata[newAppId] = AppMetadata({
-                    appId: newAppId,
-                    pcr0: pcr0,
-                    pcr1: pcr1,
-                    pcr2: pcr2,
-                    instanceCount: 1,
-                    latestVersion: instance.version
-                });
-            } else {
-                _appMetadata[newAppId].instanceCount++;
-            }
-
-            // Update instance mapping
-            _removeFromAppIdList(oldAppId, appContract);
-            _appIdToContracts[newAppId].push(appContract);
-
-            instance.appId = newAppId;
-        } else {
-            // Same appId, just update the PCR values in metadata
-            _appMetadata[newAppId].pcr0 = pcr0;
-            _appMetadata[newAppId].pcr1 = pcr1;
-            _appMetadata[newAppId].pcr2 = pcr2;
+        // Verify version chain link
+        AppVersion storage newVersion = _appVersions[newAppId];
+        if (newVersion.appId == bytes32(0)) {
+            revert InvalidVersionChain();
+        }
+        if (newVersion.previousAppId != currentAppId) {
+            revert InvalidVersionChain();
         }
 
-        emit PCRsUpdated(appContract, pcr0, pcr1, pcr2);
+        // Get current budget
+        uint256 budgetToTransfer = instance.gasBudget;
+
+        // Update instance to new version
+        instance.appId = newAppId;
+
+        // Mark old version as deprecated
+        _appVersions[currentAppId].deprecated = true;
+
+        // Update app Id lists
+        _removeFromAppIdList(currentAppId, appContract);
+        _appIdToContracts[newAppId].push(appContract);
+
+        emit BudgetMigrated(appContract, currentAppId, newAppId, budgetToTransfer);
+    }
+
+    /**
+     * @inheritdoc INovaRegistry
+     */
+    function getAppVersion(bytes32 appId) external view override returns (AppVersion memory) {
+        return _appVersions[appId];
+    }
+
+    /**
+     * @inheritdoc INovaRegistry
+     */
+    function getVersionHistory(address appContract) external view override returns (bytes32[] memory) {
+        return _versionHistory[appContract];
     }
 
     /**
@@ -681,6 +706,71 @@ contract NovaRegistry is
                 contracts.pop();
                 break;
             }
+        }
+    }
+
+    /**
+     * @dev Validates semantic version format
+     * @param version Semantic version string (must start with 'v')
+     */
+    function _validateSemanticVersion(string memory version) private pure {
+        bytes memory versionBytes = bytes(version);
+        
+        if (versionBytes.length == 0) {
+            revert InvalidSemanticVersion();
+        }
+        
+        if (versionBytes.length > 32) {
+            revert InvalidSemanticVersion();
+        }
+        
+        if (versionBytes[0] != 'v') {
+            revert InvalidSemanticVersion();
+        }
+        
+        // Additional format validation could be added here
+        // For now, we just check it starts with 'v' and has reasonable length
+    }
+
+    /**
+     * @dev Validates version chain integrity
+     * @param appContract App contract address
+     * @param newAppId New version's appId
+     * @param previousAppId Previous version's appId (0x0 for first version)
+     */
+    function _validateVersionChain(
+        address appContract,
+        bytes32 newAppId,
+        bytes32 previousAppId
+    ) private view {
+        // If this is the first version, no validation needed
+        if (previousAppId == bytes32(0)) {
+            return;
+        }
+
+        // Verify previous version exists
+        AppVersion storage prevVersion = _appVersions[previousAppId];
+        if (prevVersion.appId == bytes32(0)) {
+            revert InvalidVersionChain();
+        }
+
+        // Verify previous version belongs to same app contract
+        bytes32[] storage history = _versionHistory[appContract];
+        bool found = false;
+        for (uint256 i = 0; i < history.length; i++) {
+            if (history[i] == previousAppId) {
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found) {
+            revert InvalidVersionChain();
+        }
+
+        // Prevent linking to self
+        if (newAppId == previousAppId) {
+            revert InvalidVersionChain();
         }
     }
 

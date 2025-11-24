@@ -397,11 +397,11 @@ For production deployment on Base mainnet:
 
 For deployment issues:
 - Check [GitHub Issues](link-to-issues)
-- Review [ARCHITECTURE.md](ARCHITECTURE.md) for system design
+- Review [DESIGN.md](DESIGN.md) for system design and architecture
 - Join community Discord/Telegram
 
 ---
 
-**Last Updated**: 2025-11-20  
+**Last Updated**: 2025-11-24  
 **Network**: Base Sepolia Testnet  
 **Foundry Version**: Latest

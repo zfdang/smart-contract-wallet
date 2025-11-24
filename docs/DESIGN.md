@@ -328,22 +328,25 @@ journal.validatePCRs(metadata.pcr0, metadata.pcr1, metadata.pcr2);
 - Ensures enclave is running approved code
 - Any mismatch causes transaction revert
 
-**Step 6.3: Deploy Smart Contract Wallet**
+**Step 6.3: Update Instance State**
 ```solidity
 instance.operator = ethAddress;
-instance.walletAddress = address(0); // Placeholder, updated when wallet deployed
+instance.walletAddress = ethAddress; // Initially set to operator address
+instance.status = InstanceStatus.Active;
+instance.lastHeartbeat = block.timestamp;
 INovaApp(appContract).setOperator(ethAddress);
 ```
 - Register operator (enclave's ETH address) in AppInstance
+- Initially set `walletAddress` to operator address (temporary)
+- Update status to Active and set initial heartbeat
 - Call app contract to set operator (for app's own logic)
-- Factory deploys EIP-4337 AppWallet (via CREATE2 for deterministic address)
-- Wallet configured with operator for signature validation
+
+> **Note**: The EIP-4337 smart contract wallet is deployed separately by the platform after activation using `AppWalletFactory.createWallet()`. Once deployed, the platform calls `NovaRegistry.updateWalletAddress()` to update the instance. This separation allows the platform to handle wallet deployment asynchronously without blocking activation.
 
 **Step 6.4: Finalize Activation**
-- Update instance status: `Registered → Active`
-- Set `lastHeartbeat = block.timestamp`
-- Emit `AppActivated` event
-- App can now execute gas-free UserOperations via Paymaster
+- Emit `AppActivated` event with operator and wallet addresses
+- App can now be used (operator can sign transactions directly)
+- Once platform deploys the AppWallet, gas-free UserOperations become available
 
 ### UserOperation Execution Flow
 
@@ -422,63 +425,50 @@ sequenceDiagram
 
 ### 🔴 Critical Issues
 
-#### 1. Attestation Replay Attack ✅ **IMPLEMENTED**
+#### 1. Attestation Replay Attack ✅ **SOLVED**
 
-**Problem**: Same attestation could potentially be used multiple times to activate different app instances.
+**Problem**: Attackers could reuse valid attestations to activate unauthorized apps.
 
-**Risk**: Attacker could reuse a valid attestation to activate malicious apps.
+**Solution**: Multi-layer replay protection implemented in v2.0.0:
 
-**Implementation Status**: ✅ **SOLVED** (v2.0.0)
+1. **Timestamp Validation**: 5-minute validity window with 1-minute clock drift tolerance
+2. **Attestation Hash Tracking**: Complete attestation hash stored in `_usedAttestations` mapping
+3. **Nonce Tracking**: Separate nonce hash stored in `_usedNonces` mapping  
+4. **Dual Verification**: Both hash and nonce checked independently
 
-**Current Protection (Multi-Layer Defense)**:
+**Implementation** (`NovaRegistry.sol`):
 ```solidity
-// 1. Track used attestations
+// Storage
 mapping(bytes32 => bool) private _usedAttestations;
 mapping(bytes32 => bool) private _usedNonces;
+uint256 public constant ATTESTATION_VALIDITY_WINDOW = 5 minutes;
 
-// 2. Validate and consume attestation
+// Validation function
 function _validateAndConsumeAttestation(journal, appContract) {
-    // Check timestamp (5 minute validity window)
+    // 1. Check timestamp (5-minute validity)
     _validateAttestationTimestamp(journal.timestamp);
     
-    // Compute unique hash (includes nonce, timestamp, all data)
+    // 2. Compute and check attestation hash
     bytes32 attestationHash = _computeAttestationHash(journal);
+    if (_usedAttestations[attestationHash]) revert AttestationAlreadyUsed();
     
-    // Check if already used
-    if (_usedAttestations[attestationHash]) {
-        revert AttestationAlreadyUsed();
-    }
-    
-    // Check nonce separately (extra layer)
+    // 3. Check nonce separately
     bytes32 nonceHash = keccak256(journal.nonce);
-    if (_usedNonces[nonceHash]) {
-        revert NonceAlreadyUsed();
-    }
+    if (_usedNonces[nonceHash]) revert NonceAlreadyUsed();
     
-    // Mark as used
+    // 4. Mark both as used
     _usedAttestations[attestationHash] = true;
     _usedNonces[nonceHash] = true;
-    
-    emit AttestationConsumed(appContract, attestationHash, nonceHash, timestamp);
 }
 ```
 
-**Protection Layers**:
-1. ✅ **Nonce Uniqueness**: Each attestation contains unique 32-byte random nonce
-2. ✅ **Hash Tracking**: Full attestation hash prevents any reuse
-3. ✅ **Time Validation**: 5-minute validity window + 1-minute clock drift tolerance
-4. ✅ **Dual Verification**: Both hash and nonce checked independently
+**Gas Cost**: +47k gas (~15% increase) per activation
 
-**Prevented Attack Scenarios**:
+**Attack Scenarios Prevented**:
 - ✅ Same attestation replayed for different app
 - ✅ Same nonce used with different attestation data
 - ✅ Old leaked attestation reused after time window
 - ✅ Pre-generated future attestation
-
-**References**: 
-- Implementation: `nova-contracts/core/NovaRegistry.sol`
-- Tests: `test/NovaRegistry.replay.t.sol`
-- Documentation: `docs/ATTESTATION_REPLAY_PROTECTION.md`
 
 #### 2. Ephemeral Private Key Compromise
 

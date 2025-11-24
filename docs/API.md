@@ -244,6 +244,23 @@ Deduct gas from app's budget (called by Paymaster).
 **Events:**
 - `GasConsumed(appContract, amount)`
 
+---
+
+#### `updateWalletAddress(address appContract, address walletAddress)`
+
+Update the wallet address for an app instance (called by platform after wallet deployment).
+
+**Access:** PLATFORM_ROLE only
+
+**Parameters:**
+- `appContract`: App contract address
+- `walletAddress`: Deployed wallet address
+
+**Requirements:**
+- App must be registered
+
+> **Note**: This is called by the platform after deploying the AppWallet via AppWalletFactory. During activation, `walletAddress` is initially set to the operator address.
+
 ### Admin Functions
 
 #### `setHeartbeatConfig(uint256 interval, uint256 expiry)`
@@ -622,5 +639,5 @@ event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
 
 ---
 
-**Last Updated**: 2025-11-20  
-**Version**: 1.0
+**Last Updated**: 2025-11-24  
+**Version**: 2.0

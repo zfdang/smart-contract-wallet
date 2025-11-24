@@ -61,6 +61,7 @@ sequenceDiagram
     participant Platform
     participant Enclave
     participant ZKProver
+    participant Verifier
     participant NovaRegistry
     participant AppWalletFactory
     participant AppContract
@@ -81,8 +82,9 @@ sequenceDiagram
     Note over Platform, NovaRegistry: Step 5: Activation Call
     Platform->>NovaRegistry: activateApp(output, zkCoprocessor, proof)
 
-    Note over NovaRegistry: Step 6.1: Verify Proof
-    NovaRegistry->>NovaRegistry: Verify proof & Return journal
+    Note over NovaRegistry, Verifier: Step 6.1: Verify Proof
+    NovaRegistry->>Verifier: Verify proof
+    Verifier-->>NovaRegistry: Return journal
 
     Note over NovaRegistry: Step 6.2: Validate & Consume
     Note right of NovaRegistry: - Check timestamp freshness<br/>- Check attestation not used<br/>- Check nonce not used<br/>- Mark both as consumed<br/>- Extract & Validate PCRs

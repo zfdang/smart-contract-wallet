@@ -172,7 +172,7 @@ sequenceDiagram
     participant Platform
     participant Enclave
     participant ZKProver
-    participant Verifier
+    participant ZKVerifier
     participant NovaRegistry
     participant AppWalletFactory
     participant AppContract

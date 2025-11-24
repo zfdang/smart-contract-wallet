@@ -16,9 +16,14 @@ nova-contracts/
 │   └── NovaPaymaster.sol      # Gas sponsorship paymaster
 ├── account/
 │   └── AppWallet.sol          # EIP-4337 wallet implementation
+├── verifiers/                 # TEE attestation verifiers
+│   ├── NitroEnclaveVerifier.sol   # AWS Nitro Enclave verifier
+│   ├── IntelSGXVerifier.sol       # Intel SGX verifier (placeholder)
+│   └── AMDSEVVerifier.sol         # AMD SEV-SNP verifier (placeholder)
 ├── interfaces/
 │   ├── INovaRegistry.sol      # Registry interface
-│   ├── INitroEnclaveVerifier.sol  # Verifier interface
+│   ├── INitroEnclaveVerifier.sol  # Nitro verifier interface
+│   ├── ITEEVerifier.sol       # Generic TEE verifier interface
 │   └── IEntryPoint.sol        # EIP-4337 interfaces
 ├── libraries/
 │   └── AttestationLib.sol     # Attestation processing
@@ -40,7 +45,7 @@ app-contracts/
 
 ## Contract Summary
 
-### Nova Platform Contracts (9 files)
+### Nova Platform Contracts (13 files)
 
 **Core Platform (3)**:
 - [NovaRegistry.sol](file:///home/ubuntu/smart-contract-wallet/nova-contracts/core/NovaRegistry.sol) - Main platform contract
@@ -50,22 +55,28 @@ app-contracts/
 **Account Abstraction (1)**:
 - [AppWallet.sol](file:///home/ubuntu/smart-contract-wallet/nova-contracts/account/AppWallet.sol) - EIP-4337 wallet
 
-**Interfaces (3)**:
-- [INovaRegistry.sol](file:///home/ubuntu/smart-contract-wallet/nova-contracts/interfaces/INovaRegistry.sol)
-- [INitroEnclaveVerifier.sol](file:///home/ubuntu/smart-contract-wallet/nova-contracts/interfaces/INitroEnclaveVerifier.sol)
-- [IEntryPoint.sol](file:///home/ubuntu/smart-contract-wallet/nova-contracts/interfaces/IEntryPoint.sol)
+**TEE Verifiers (3)**:
+- [NitroEnclaveVerifier.sol](nova-contracts/verifiers/NitroEnclaveVerifier.sol) - AWS Nitro verifier
+- [IntelSGXVerifier.sol](nova-contracts/verifiers/IntelSGXVerifier.sol) - Intel SGX placeholder
+- [AMDSEVVerifier.sol](nova-contracts/verifiers/AMDSEVVerifier.sol) - AMD SEV placeholder
+
+**Interfaces (4)**:
+- [INovaRegistry.sol](nova-contracts/interfaces/INovaRegistry.sol)
+- [INitroEnclaveVerifier.sol](nova-contracts/interfaces/INitroEnclaveVerifier.sol)
+- [ITEEVerifier.sol](nova-contracts/interfaces/ITEEVerifier.sol)
+- [IEntryPoint.sol](nova-contracts/interfaces/IEntryPoint.sol)
 
 **Libraries & Types (2)**:
-- [AttestationLib.sol](file:///home/ubuntu/smart-contract-wallet/nova-contracts/libraries/AttestationLib.sol)
-- [NitroTypes.sol](file:///home/ubuntu/smart-contract-wallet/nova-contracts/types/NitroTypes.sol)
+- [AttestationLib.sol](nova-contracts/libraries/AttestationLib.sol)
+- [NitroTypes.sol](nova-contracts/types/NitroTypes.sol)
 
 ### App Contracts (2 files)
 
 **Interfaces (1)**:
-- [INovaApp.sol](file:///home/ubuntu/smart-contract-wallet/app-contracts/interfaces/INovaApp.sol) - Standard app interface
+- [INovaApp.sol](app-contracts/interfaces/INovaApp.sol) - Standard app interface
 
 **Examples (1)**:
-- [ExampleApp.sol](file:///home/ubuntu/smart-contract-wallet/app-contracts/examples/ExampleApp.sol) - Reference implementation
+- [ExampleApp.sol](app-contracts/examples/ExampleApp.sol) - Reference implementation
 
 ## Import Path Conventions
 
@@ -127,14 +138,32 @@ cd app-contracts
 # Import nova-contracts interfaces as needed
 ```
 
-## Next Steps
+## Recent Improvements
 
-1. **Remove Old Directory**: Delete `contracts-old/` after verification
-2. **Update Documentation**: Update README.md with new structure
-3. **Update Tests**: Organize tests into `test/nova/` and `test/apps/`
-4. **Package Configuration**: Consider splitting into separate packages
+### Multi-TEE Support
+- Added `ITEEVerifier` interface for pluggable TEE verifiers
+- Implemented `NitroEnclaveVerifier` with full attestation verification
+- Added placeholder verifiers for Intel SGX and AMD SEV-SNP
+- Registry now supports multiple TEE types (Nitro, SGX, SEV)
+
+### Version Chains
+- Apps can now register with semantic versioning (e.g., "v1.0.0")
+- Budget migration support for seamless upgrades
+- Version history tracking per app contract
+- Backward-compatible version chain linking
+
+### Gas Optimizations
+- Batch heartbeat updates (83% gas savings for 1000 apps)
+- Bounded storage with attestation cleanup (7-day retention)
+- Efficient replay protection with dual hash tracking
+
+### Developer Experience
+- Updated `INovaApp` interface with PCR getters
+- Comprehensive `DEVELOPER_GUIDE.md` with 10-step lifecycle
+- Complete API reference in `API.md`
+- Example deployment scripts and tests
 
 ---
 
-**Last Updated**: 2025-11-20  
-**Structure Version**: 2.0
+**Last Updated**: 2025-11-24  
+**Structure Version**: 2.1

@@ -8,13 +8,15 @@ The Nova platform allows developers to deploy decentralized applications that ru
 
 ### Key Features
 
-- **🔐 TEE-Verified Deployment**: Applications are verified using zero-knowledge proofs of AWS Nitro Enclave attestations
+- **🔐 Multi-TEE Support**: Supports AWS Nitro Enclaves, Intel SGX, and AMD SEV-SNP with pluggable verifiers
+- **🔗 Version Chains**: Semantic versioning with budget migration for seamless app upgrades
 - **📦 PCR-Based App Grouping**: Apps with identical Platform Configuration Registers (PCRs) are automatically grouped
 - **💳 EIP-4337 Account Abstraction**: Each app gets a smart contract wallet with sponsored gas
 - **🔄 Dual Control Mechanism**: Operators control business logic, Nova platform manages infrastructure
-- **❤️ Heartbeat Monitoring**: Continuous liveness tracking with configurable intervals
-- **📊 Version Management**: Automatic versioning for app instances
+- **❤️ Batch Heartbeat Monitoring**: Gas-optimized liveness tracking (83% gas savings for 1000 apps)
+- **🧹 Bounded Storage**: Automatic cleanup of expired attestations (7-day retention)
 - **⬆️ Upgradeable Architecture**: UUPS proxy pattern for platform upgrades
+- **🔒 Replay Protection**: Attestation and nonce-based protection against replay attacks
 
 ## Architecture
 
@@ -74,9 +76,8 @@ The Nova platform allows developers to deploy decentralized applications that ru
 git clone <repository-url>
 cd smart-contract-wallet
 
-# Install dependencies
-forge install OpenZeppelin/openzeppelin-contracts-upgradeable
-forge install OpenZeppelin/openzeppelin-contracts
+# Install dependencies (via git submodules)
+forge install
 
 # Build contracts
 forge build
@@ -334,9 +335,11 @@ Apache-2.0 - see [LICENSE](LICENSE) for details.
 
 ## Documentation
 
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Detailed system architecture
+- [API.md](docs/API.md) - Complete API reference for all contracts
+- [DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) - Step-by-step guide for app developers
 - [DEPLOYMENT.md](docs/DEPLOYMENT.md) - Deployment guide for Base Sepolia
-- [API.md](docs/API.md) - Contract API reference
+- [DESIGN.md](docs/DESIGN.md) - Architecture and design decisions
+- [PROJECT.md](PROJECT.md) - Project structure and organization
 
 ## Support
 
